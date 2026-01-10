@@ -21,17 +21,17 @@ io.on("connection", (socket) => {
 
 async function start() {
   try {
-	const mongoUrl =
-	  process.env.MONGO_URL ||
-	  process.env.MONGODB_URL ||
-	  process.env.MONGODB_URI;
-	if (!mongoUrl) {
-	  console.error("MongoDB URL not set in environment variables!");
-	  process.exit(1);
-	}
+    // Берём MongoDB из Railway
+    const mongoUrl = process.env.MONGO_URL;
+    if (!mongoUrl) {
+      console.error(
+        "MongoDB URL not set in environment variables! Check Railway Variables."
+      );
+      process.exit(1);
+    }
 
-	await mongoose.connect(mongoUrl);
-	console.log("MongoDB connected");
+    await mongoose.connect(mongoUrl);
+    console.log("MongoDB connected");
 
     httpServer.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);

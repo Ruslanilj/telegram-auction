@@ -21,16 +21,20 @@ io.on("connection", (socket) => {
 
 async function start() {
   try {
-    await mongoose.connect("mongodb://localhost:27017/auction");
+    const mongoUrl =
+      process.env.MONGODB_URL ||
+      process.env.MONGODB_URI ||
+      "mongodb://localhost:27017/auction";
+
+    await mongoose.connect(mongoUrl);
     console.log("MongoDB connected");
 
     httpServer.listen(PORT, () => {
-      console.log(`Server running on http://localhost:${PORT}`);
+      console.log(`Server running on port ${PORT}`);
     });
   } catch (err) {
     console.error("Failed to start server", err);
   }
 }
 
-console.log("TG TOKEN:", process.env.TG_BOT_TOKEN);
 start();

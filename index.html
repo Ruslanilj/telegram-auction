@@ -43,7 +43,7 @@ button,input { margin-top:5px; }
 
 <script src="https://cdn.socket.io/4.7.1/socket.io.min.js"></script>
 <script>
-const API = "http://localhost:3000";
+const API = `${window.location.protocol}//${window.location.host}`;
 const socket = io(API);
 
 function getUser() { return JSON.parse(localStorage.getItem("user")); }

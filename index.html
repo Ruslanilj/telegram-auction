@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Live Auction Demo</title>
+<style>
+body { font-family: Arial; padding: 20px; }
+h1,h2 { margin-bottom: 10px; }
+.box { border:1px solid #ccc; padding:15px; border-radius:5px; max-width:500px; margin-bottom:20px; }
+.auction { border-bottom:1px solid #eee; padding:10px 0; }
+button,input { margin-top:5px; }
+#profile { font-weight:bold; margin-bottom:10px; }
+</style>
+</head>
+<body>
+
+<h1>Live Auction Demo</h1>
+
+<div id="login-box" class="box">
+  <h2>Login</h2>
+  <input id="username" placeholder="Enter username">
+  <br>
+  <button onclick="login()">Login</button>
+</div>
+
+<div id="app" style="display:none">
+  <div id="profile"></div>
+
+  <div class="box">
+    <h2>Create Auction</h2>
+    <input id="item" placeholder="Item name"><br>
+    <input id="price" type="number" placeholder="Starting price"><br>
+    <button onclick="createAuction()">Create</button>
+  </div>
+
+  <div class="box">
+    <h2>Auctions</h2>
+    <div id="auctions"></div>
+  </div>
+
+  <button onclick="logout()">Logout</button>
+</div>
+
+<script src="https://cdn.socket.io/4.7.1/socket.io.min.js"></script>
+<script>
+const API = "http://localhost:3000";
+const socket = io(API);
+
+function getUser() { return JSON.parse(localStorage.getItem("user")); }
+
+function login() {
+  const username = document.getElementById("username").value;
+  if (!username) return alert("Enter username");
+
+  fetch(`${API}/auth/local`, {
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({username})
+  }).then(res=>res.json())
+    .then(user=>{
+      localStorage.setItem("user", JSON.stringify(user));
+      init();
+    });
+}
+
+function logout() {
+  localStorage.removeItem("user");
+  location.reload();
+}
+
+function init() {
+  const user = getUser();
+  if(!user) return;
+  document.getElementById("login-box").style.display="none";
+  document.getElementById("app").style.display="block";
+  renderProfile();
+  loadAuctions();
+}
+
+// ===== UI =====
+function renderProfile() {
+  const user = getUser();
+  document.getElementById("profile").innerText =
+    `👤 ${user.username} | 💰 Balance: ${user.balance}`;
+}
+
+// ===== Auctions =====
+function loadAuctions() {
+  fetch(`${API}/auctions`)
+    .then(res=>res.json())
+    .then(auctions=>{
+      const div=document.getElementById("auctions");
+      div.innerHTML="";
+      auctions.forEach(a=>{
+        div.innerHTML+=`
+          <div class="auction" id="auction-${a._id}">
+            <b>${a.item}</b><br>
+            Start: ${a.startingPrice}<br>
+            Highest: ${a.highestBid}<br>
+            Winner: ${a.highestBidder ? a.highestBidder.username : "-"}<br>
+            <input type="number" id="bid-${a._id}" placeholder="Your bid">
+            <button onclick="bid('${a._id}')">Bid</button>
+          </div>
+        `;
+      });
+    });
+}
+
+function createAuction() {
+  const item=document.getElementById("item").value;
+  const price=parseInt(document.getElementById("price").value);
+  if(!item || !price) return alert("Fill fields");
+
+  fetch(`${API}/auctions`, {
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({item, startingPrice:price})
+  }).then(()=>{document.getElementById("item").value=""; document.getElementById("price").value="";});
+}
+
+function bid(auctionId) {
+  const user = getUser();
+  const amount = parseInt(document.getElementById(`bid-${auctionId}`).value);
+  if(!amount) return alert("Enter bid");
+
+  fetch(`${API}/auctions/${auctionId}/bid`, {
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({userId:user._id, amount})
+  })
+  .then(res=>res.json())
+  .then(data=>{
+    if(data.user) {
+      localStorage.setItem("user", JSON.stringify(data.user));
+      renderProfile();
+    }
+  });
+}
+
+// ===== Socket.IO для живого обновления =====
+socket.on("auctionUpdated", auction=>{
+  const auctionDiv = document.getElementById(`auction-${auction._id}`);
+  if(!auctionDiv) {
+    loadAuctions(); // если нового нет в DOM
+    return;
+  }
+  auctionDiv.innerHTML=`
+    <b>${auction.item}</b><br>
+    Start: ${auction.startingPrice}<br>
+    Highest: ${auction.highestBid}<br>
+    Winner: ${auction.highestBidder ? auction.highestBidder.username : "-"}<br>
+    <input type="number" id="bid-${auction._id}" placeholder="Your bid">
+    <button onclick="bid('${auction._id}')">Bid</button>
+  `;
+});
+
+// ===== Start =====
+init();
+</script>
+</body>
+</html>

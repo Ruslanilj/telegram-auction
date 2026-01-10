@@ -21,13 +21,16 @@ io.on("connection", (socket) => {
 
 async function start() {
   try {
-    const mongoUrl =
-      process.env.MONGODB_URL ||
-      process.env.MONGODB_URI ||
-      "mongodb://localhost:27017/auction";
+	const mongoUrl =
+	  process.env.MONGODB_URL || process.env.MONGODB_URI;
+	if (!mongoUrl) {
+	  console.error("MongoDB URL not set in environment variables!");
+	  process.exit(1);
+	}
 
-    await mongoose.connect(mongoUrl);
-    console.log("MongoDB connected");
+	await mongoose.connect(mongoUrl);
+	console.log("MongoDB connected");
+
 
     httpServer.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);

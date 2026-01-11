@@ -138,10 +138,10 @@ app.post("/auctions/:id/bid", async (req, res) => {
 });
 
 // ===== Reset =====
-app.delete("/reset", async (_, res) => {
+app.get("/reset", async (_, res) => {
   await User.deleteMany({});
   await Auction.deleteMany({});
-  res.send("Database cleared");
+  res.send("Database cleared!");
 });
 
 export default app;

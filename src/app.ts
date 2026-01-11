@@ -3,16 +3,38 @@ import User from "./models/User";
 import Auction from "./models/Auction";
 import path from "path";
 import crypto from "crypto";
-import { io } from "./server"; // импорт Socket.IO
+import { io } from "./server";
 
 const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "..")));
 
-// ===== Проверка сервера =====
+// ===== Health =====
 app.get("/health", (_, res) => res.send("OK"));
 
-// ===== Пользователи =====
+// ===== Telegram auth utils =====
+function verifyTelegramAuth(data: any): boolean {
+  const { hash, ...rest } = data;
+
+  const secret = crypto
+    .createHash("sha256")
+    .update(process.env.TG_BOT_TOKEN!)
+    .digest();
+
+  const checkString = Object.keys(rest)
+    .sort()
+    .map(key => `${key}=${rest[key]}`)
+    .join("\n");
+
+  const hmac = crypto
+    .createHmac("sha256", secret)
+    .update(checkString)
+    .digest("hex");
+
+  return hmac === hash;
+}
+
+// ===== Auth =====
 app.post("/auth/local", async (req, res) => {
   const { username } = req.body;
   if (!username) return res.status(400).json({ error: "username required" });
@@ -25,39 +47,72 @@ app.post("/auth/local", async (req, res) => {
   res.json(user);
 });
 
-app.get("/users", async (_, res) => {
-  const users = await User.find();
-  res.json(users);
+app.post("/auth/telegram", async (req, res) => {
+  try {
+    const data = req.body;
+
+    if (!verifyTelegramAuth(data)) {
+      return res.status(401).json({ error: "Invalid Telegram auth" });
+    }
+
+    const telegramId = data.id;
+    const username =
+      data.username || `${data.first_name || "tg"}_${telegramId}`;
+
+    let user = await User.findOne({ telegramId });
+
+    if (!user) {
+      user = await User.create({
+        telegramId,
+        username,
+        balance: 1000,
+      });
+    }
+
+    res.json(user);
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
 });
 
-// ===== Аукционы =====
+// ===== Users =====
+app.get("/users", async (_, res) => {
+  res.json(await User.find());
+});
+
+// ===== Auctions =====
 app.post("/auctions", async (req, res) => {
   const { item, startingPrice } = req.body;
   const auction = await Auction.create({ item, startingPrice });
+
   res.status(201).json(auction);
 
-  // пушим новый аукцион всем клиентам
-  io.emit("auctionUpdated", await Auction.findById(auction._id).populate("highestBidder"));
+  io.emit(
+    "auctionUpdated",
+    await Auction.findById(auction._id).populate("highestBidder")
+  );
 });
 
 app.get("/auctions", async (_, res) => {
-  const auctions = await Auction.find().populate("highestBidder");
-  res.json(auctions);
+  res.json(await Auction.find().populate("highestBidder"));
 });
 
-// ===== Сделать ставку =====
+// ===== Bid =====
 app.post("/auctions/:id/bid", async (req, res) => {
   try {
     const { userId, amount } = req.body;
     const auction = await Auction.findById(req.params.id).populate("highestBidder");
-    if (!auction || !auction.isActive) return res.status(400).json({ error: "Auction not active" });
+
+    if (!auction || !auction.isActive)
+      return res.status(400).json({ error: "Auction not active" });
 
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ error: "User not found" });
-    if (amount <= auction.highestBid) return res.status(400).json({ error: "Bid too low" });
-    if (user.balance < amount) return res.status(400).json({ error: "Not enough balance" });
+    if (amount <= auction.highestBid)
+      return res.status(400).json({ error: "Bid too low" });
+    if (user.balance < amount)
+      return res.status(400).json({ error: "Not enough balance" });
 
-    // вернуть деньги предыдущему лидеру
     if (auction.highestBidder) {
       const prev = await User.findById(auction.highestBidder._id);
       if (prev) {
@@ -73,22 +128,20 @@ app.post("/auctions/:id/bid", async (req, res) => {
     auction.highestBidder = user._id;
     await auction.save();
 
-    const updatedAuction = await Auction.findById(auction._id).populate("highestBidder");
+    const updated = await Auction.findById(auction._id).populate("highestBidder");
+    io.emit("auctionUpdated", updated);
 
-    // пушим обновление всем клиентам
-    io.emit("auctionUpdated", updatedAuction);
-
-    res.json({ user, auction: updatedAuction });
+    res.json({ user, auction: updated });
   } catch (e: any) {
     res.status(400).json({ error: e.message });
   }
 });
 
-// ===== Очистка базы =====
+// ===== Reset =====
 app.delete("/reset", async (_, res) => {
   await User.deleteMany({});
   await Auction.deleteMany({});
-  res.send("Database cleared!");
+  res.send("Database cleared");
 });
 
 export default app;

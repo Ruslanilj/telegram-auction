@@ -3,24 +3,45 @@
 <head>
 <meta charset="UTF-8">
 <title>Live Auction Demo</title>
+
 <style>
 body { font-family: Arial; padding: 20px; }
 h1,h2 { margin-bottom: 10px; }
-.box { border:1px solid #ccc; padding:15px; border-radius:5px; max-width:500px; margin-bottom:20px; }
+.box {
+  border:1px solid #ccc;
+  padding:15px;
+  border-radius:5px;
+  max-width:500px;
+  margin-bottom:20px;
+}
 .auction { border-bottom:1px solid #eee; padding:10px 0; }
 button,input { margin-top:5px; }
 #profile { font-weight:bold; margin-bottom:10px; }
 </style>
 </head>
+
 <body>
 
 <h1>Live Auction Demo</h1>
 
 <div id="login-box" class="box">
   <h2>Login</h2>
+
   <input id="username" placeholder="Enter username">
   <br>
   <button onclick="login()">Login</button>
+
+  <hr>
+
+  <h3>Login with Telegram</h3>
+  <script async src="https://telegram.org/js/telegram-widget.js?22"
+    data-telegram-login="auctiotestabot"
+    data-size="large"
+    data-userpic="false"
+    data-lang="en"
+    data-onauth="onTelegramAuth(user)"
+    data-request-access="write">
+  </script>
 </div>
 
 <div id="app" style="display:none">
@@ -42,25 +63,45 @@ button,input { margin-top:5px; }
 </div>
 
 <script src="https://cdn.socket.io/4.7.1/socket.io.min.js"></script>
+
 <script>
 const API = `${window.location.protocol}//${window.location.host}`;
 const socket = io(API);
 
-function getUser() { return JSON.parse(localStorage.getItem("user")); }
+function getUser() {
+  return JSON.parse(localStorage.getItem("user"));
+}
 
+// ===== Local login =====
 function login() {
   const username = document.getElementById("username").value;
   if (!username) return alert("Enter username");
 
   fetch(`${API}/auth/local`, {
-    method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({username})
-  }).then(res=>res.json())
-    .then(user=>{
-      localStorage.setItem("user", JSON.stringify(user));
-      init();
-    });
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username })
+  })
+  .then(res => res.json())
+  .then(user => {
+    localStorage.setItem("user", JSON.stringify(user));
+    init();
+  });
+}
+
+// ===== Telegram login =====
+function onTelegramAuth(user) {
+  fetch(`${API}/auth/telegram`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(user)
+  })
+  .then(res => res.json())
+  .then(dbUser => {
+    localStorage.setItem("user", JSON.stringify(dbUser));
+    init();
+  })
+  .catch(() => alert("Telegram auth failed"));
 }
 
 function logout() {
@@ -68,11 +109,14 @@ function logout() {
   location.reload();
 }
 
+// ===== Init =====
 function init() {
   const user = getUser();
-  if(!user) return;
-  document.getElementById("login-box").style.display="none";
-  document.getElementById("app").style.display="block";
+  if (!user) return;
+
+  document.getElementById("login-box").style.display = "none";
+  document.getElementById("app").style.display = "block";
+
   renderProfile();
   loadAuctions();
 }
@@ -87,12 +131,13 @@ function renderProfile() {
 // ===== Auctions =====
 function loadAuctions() {
   fetch(`${API}/auctions`)
-    .then(res=>res.json())
-    .then(auctions=>{
-      const div=document.getElementById("auctions");
-      div.innerHTML="";
-      auctions.forEach(a=>{
-        div.innerHTML+=`
+    .then(res => res.json())
+    .then(auctions => {
+      const div = document.getElementById("auctions");
+      div.innerHTML = "";
+
+      auctions.forEach(a => {
+        div.innerHTML += `
           <div class="auction" id="auction-${a._id}">
             <b>${a.item}</b><br>
             Start: ${a.startingPrice}<br>
@@ -107,44 +152,50 @@ function loadAuctions() {
 }
 
 function createAuction() {
-  const item=document.getElementById("item").value;
-  const price=parseInt(document.getElementById("price").value);
-  if(!item || !price) return alert("Fill fields");
+  const item = document.getElementById("item").value;
+  const price = parseInt(document.getElementById("price").value);
+
+  if (!item || !price) return alert("Fill fields");
 
   fetch(`${API}/auctions`, {
-    method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({item, startingPrice:price})
-  }).then(()=>{document.getElementById("item").value=""; document.getElementById("price").value="";});
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ item, startingPrice: price })
+  }).then(() => {
+    document.getElementById("item").value = "";
+    document.getElementById("price").value = "";
+  });
 }
 
 function bid(auctionId) {
   const user = getUser();
   const amount = parseInt(document.getElementById(`bid-${auctionId}`).value);
-  if(!amount) return alert("Enter bid");
+
+  if (!amount) return alert("Enter bid");
 
   fetch(`${API}/auctions/${auctionId}/bid`, {
-    method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({userId:user._id, amount})
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ userId: user._id, amount })
   })
-  .then(res=>res.json())
-  .then(data=>{
-    if(data.user) {
+  .then(res => res.json())
+  .then(data => {
+    if (data.user) {
       localStorage.setItem("user", JSON.stringify(data.user));
       renderProfile();
     }
   });
 }
 
-// ===== Socket.IO для живого обновления =====
-socket.on("auctionUpdated", auction=>{
+// ===== Socket.IO =====
+socket.on("auctionUpdated", auction => {
   const auctionDiv = document.getElementById(`auction-${auction._id}`);
-  if(!auctionDiv) {
-    loadAuctions(); // если нового нет в DOM
+  if (!auctionDiv) {
+    loadAuctions();
     return;
   }
-  auctionDiv.innerHTML=`
+
+  auctionDiv.innerHTML = `
     <b>${auction.item}</b><br>
     Start: ${auction.startingPrice}<br>
     Highest: ${auction.highestBid}<br>

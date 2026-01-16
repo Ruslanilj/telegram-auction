@@ -58,6 +58,9 @@ button,input { margin-top:5px; }
     <h2>Auctions</h2>
     <div id="auctions"></div>
   </div>
+  <button onclick="adjustBalance(100)">+100</button>
+  <button onclick="adjustBalance(1000)">+1000</button>
+  <button onclick="adjustBalance(-100)">-100</button>
 
   <button onclick="logout()">Logout</button>
 </div>
@@ -88,7 +91,31 @@ function login() {
     init();
   });
 }
+function adjustBalance(amount) {
+  const user = getUser();
 
+  fetch(`${API}/wallet/adjust`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ userId: user._id, amount }),
+  })
+    .then(res => res.json())
+    .then(updated => {
+      localStorage.setItem("user", JSON.stringify(updated));
+      renderProfile();
+      loadTransactions();
+    });
+}
+
+function loadTransactions() {
+  const user = getUser();
+
+  fetch(`${API}/transactions?userId=${user._id}`)
+    .then(res => res.json())
+    .then(txs => {
+      console.log("Transactions:", txs);
+    });
+}
 // ===== Telegram login =====
 function onTelegramAuth(user) {
   fetch(`${API}/auth/telegram`, {

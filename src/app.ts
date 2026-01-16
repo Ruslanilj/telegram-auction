@@ -4,6 +4,7 @@ import Auction from "./models/Auction";
 import path from "path";
 import crypto from "crypto";
 import { io } from "./server";
+import Transaction from "./models/Transaction";
 
 const app = express();
 app.use(express.json());
@@ -93,6 +94,48 @@ app.post("/auctions", async (req, res) => {
   );
 });
 
+app.post("/wallet/adjust", async (req, res) => {
+  try {
+    const { userId, amount } = req.body;
+
+    if (!userId || !amount) {
+      return res.status(400).json({ error: "userId and amount required" });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    if (amount < 0 && user.balance + amount < 0) {
+      return res.status(400).json({ error: "Not enough balance" });
+    }
+
+    user.balance += amount;
+    await user.save();
+
+    await Transaction.create({
+      user: user._id,
+      type: amount > 0 ? "deposit" : "withdraw",
+      amount,
+    });
+
+    res.json(user);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+app.get("/transactions", async (req, res) => {
+  const { userId } = req.query;
+
+  if (!userId) {
+    return res.status(400).json({ error: "userId required" });
+  }
+
+  const txs = await Transaction.find({ user: userId })
+    .sort({ createdAt: -1 })
+    .limit(20);
+
+  res.json(txs);
+});
 app.get("/auctions", async (_, res) => {
   res.json(await Auction.find().populate("highestBidder"));
 });
@@ -118,11 +161,23 @@ app.post("/auctions/:id/bid", async (req, res) => {
       if (prev) {
         prev.balance += auction.highestBid;
         await prev.save();
+		await Transaction.create({
+		  user: prev._id,
+		  type: "bid_refund",
+		  amount: auction.highestBid,
+		  auction: auction._id,
+		});
       }
     }
 
     user.balance -= amount;
     await user.save();
+	await Transaction.create({
+	  user: user._id,
+	  type: "bid_hold",
+	  amount: -amount,
+	  auction: auction._id,
+	});	
 
     auction.highestBid = amount;
     auction.highestBidder = user._id;
@@ -142,6 +197,6 @@ app.get("/reset", async (_, res) => {
   await User.deleteMany({});
   await Auction.deleteMany({});
   res.send("Database cleared!");
-});
+});	
 
 export default app;

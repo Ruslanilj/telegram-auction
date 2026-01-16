@@ -61,7 +61,10 @@ button,input { margin-top:5px; }
   <button onclick="adjustBalance(100)">+100</button>
   <button onclick="adjustBalance(1000)">+1000</button>
   <button onclick="adjustBalance(-100)">-100</button>
-
+  <div class="box">
+	  <h2>Transactions</h2>
+	  <div id="transactions"></div>
+  </div>
   <button onclick="logout()">Logout</button>
 </div>
 
@@ -109,13 +112,38 @@ function adjustBalance(amount) {
 
 function loadTransactions() {
   const user = getUser();
+  if (!user) return;
 
   fetch(`${API}/transactions?userId=${user._id}`)
     .then(res => res.json())
     .then(txs => {
-      console.log("Transactions:", txs);
+      const div = document.getElementById("transactions");
+      div.innerHTML = "";
+
+      if (!txs.length) {
+        div.innerHTML = "<i>No transactions yet</i>";
+        return;
+      }
+
+      txs.forEach(tx => {
+        const sign = tx.amount > 0 ? "+" : "";
+        const color = tx.amount > 0 ? "green" : "red";
+
+        div.innerHTML += `
+          <div>
+            <b>${tx.type}</b>
+            <span style="color:${color}">
+              ${sign}${tx.amount}
+            </span>
+            <small>
+              (${new Date(tx.createdAt).toLocaleTimeString()})
+            </small>
+          </div>
+        `;
+      });
     });
 }
+
 // ===== Telegram login =====
 function onTelegramAuth(user) {
   fetch(`${API}/auth/telegram`, {
@@ -146,6 +174,7 @@ function init() {
 
   renderProfile();
   loadAuctions();
+  loadTransactions();
 }
 
 // ===== UI =====
@@ -207,11 +236,13 @@ function bid(auctionId) {
   })
   .then(res => res.json())
   .then(data => {
-    if (data.user) {
-      localStorage.setItem("user", JSON.stringify(data.user));
-      renderProfile();
-    }
+	if (data.user) {
+	    localStorage.setItem("user", JSON.stringify(data.user));
+		renderProfile();
+		loadTransactions();
+	}
   });
+
 }
 
 // ===== Socket.IO =====

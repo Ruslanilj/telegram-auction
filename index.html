@@ -5,18 +5,21 @@
 <title>Live Auction Demo</title>
 
 <style>
-body { font-family: Arial; padding: 20px; }
-h1,h2 { margin-bottom: 10px; }
-.box {
-  border:1px solid #ccc;
-  padding:15px;
-  border-radius:5px;
-  max-width:500px;
-  margin-bottom:20px;
-}
-.auction { border-bottom:1px solid #eee; padding:10px 0; }
-button,input { margin-top:5px; }
-#profile { font-weight:bold; margin-bottom:10px; }
+  body { font-family: Arial; padding: 20px; }
+  h1,h2,h3 { margin-bottom: 10px; }
+  .box {
+    border:1px solid #ccc;
+    padding:15px;
+    border-radius:5px;
+    max-width:520px;
+    margin-bottom:20px;
+  }
+  .auction { border-bottom:1px solid #eee; padding:10px 0; }
+  button,input,select { margin-top:5px; }
+  #profile { font-weight:bold; margin-bottom:10px; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  .muted { color:#666; font-size: 12px; }
+  .ended { opacity: 0.7; }
 </style>
 </head>
 
@@ -24,6 +27,7 @@ button,input { margin-top:5px; }
 
 <h1>Live Auction Demo</h1>
 
+<!-- LOGIN -->
 <div id="login-box" class="box">
   <h2>Login</h2>
 
@@ -42,29 +46,73 @@ button,input { margin-top:5px; }
     data-onauth="onTelegramAuth(user)"
     data-request-access="write">
   </script>
+
+  <div class="muted">Tip: open another browser (or Incognito) to test bidding from another account.</div>
 </div>
 
+<!-- APP -->
 <div id="app" style="display:none">
   <div id="profile"></div>
 
+  <!-- WALLET -->
   <div class="box">
-    <h2>Create Auction</h2>
-    <input id="item" placeholder="Item name"><br>
-    <input id="price" type="number" placeholder="Starting price"><br>
-    <button onclick="createAuction()">Create</button>
+    <h2>Wallet</h2>
+    <div class="row">
+      <button onclick="adjustBalance(100)">+100</button>
+      <button onclick="adjustBalance(1000)">+1000</button>
+      <button onclick="adjustBalance(-100)">-100</button>
+    </div>
   </div>
 
+  <!-- CREATE AUCTION -->
+  <div class="box">
+    <h2>Create Auction</h2>
+
+    <div class="row">
+      <input id="item" placeholder="Item name" style="flex:1; min-width:180px;">
+      <input id="price" type="number" placeholder="Starting price" style="width:140px;">
+    </div>
+
+    <div class="row">
+      <label class="muted">Duration</label>
+      <select id="durationSec">
+        <option value="30">30s</option>
+        <option value="60" selected>60s</option>
+        <option value="120">120s</option>
+        <option value="300">300s</option>
+      </select>
+
+      <label class="muted">Sniping window</label>
+      <select id="snipingWindowSec">
+        <option value="10">10s</option>
+        <option value="15" selected>15s</option>
+        <option value="30">30s</option>
+      </select>
+
+      <label class="muted">Extend by</label>
+      <select id="extendSec">
+        <option value="10">10s</option>
+        <option value="15" selected>15s</option>
+        <option value="30">30s</option>
+      </select>
+    </div>
+
+    <button onclick="createAuction()">Create</button>
+    <div class="muted">Anti-sniping: bids in the last window extend the auction.</div>
+  </div>
+
+  <!-- AUCTIONS -->
   <div class="box">
     <h2>Auctions</h2>
     <div id="auctions"></div>
   </div>
-  <button onclick="adjustBalance(100)">+100</button>
-  <button onclick="adjustBalance(1000)">+1000</button>
-  <button onclick="adjustBalance(-100)">-100</button>
+
+  <!-- TRANSACTIONS -->
   <div class="box">
-	  <h2>Transactions</h2>
-	  <div id="transactions"></div>
+    <h2>Transactions</h2>
+    <div id="transactions"></div>
   </div>
+
   <button onclick="logout()">Logout</button>
 </div>
 
@@ -74,8 +122,15 @@ button,input { margin-top:5px; }
 const API = `${window.location.protocol}//${window.location.host}`;
 const socket = io(API);
 
+// local cache of endsAt per auction to show timer smoothly
+const endsAtCache = new Map(); // auctionId -> ms
+
 function getUser() {
   return JSON.parse(localStorage.getItem("user"));
+}
+
+function setUser(user) {
+  localStorage.setItem("user", JSON.stringify(user));
 }
 
 // ===== Local login =====
@@ -90,58 +145,9 @@ function login() {
   })
   .then(res => res.json())
   .then(user => {
-    localStorage.setItem("user", JSON.stringify(user));
+    setUser(user);
     init();
   });
-}
-function adjustBalance(amount) {
-  const user = getUser();
-
-  fetch(`${API}/wallet/adjust`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ userId: user._id, amount }),
-  })
-    .then(res => res.json())
-    .then(updated => {
-      localStorage.setItem("user", JSON.stringify(updated));
-      renderProfile();
-      loadTransactions();
-    });
-}
-
-function loadTransactions() {
-  const user = getUser();
-  if (!user) return;
-
-  fetch(`${API}/transactions?userId=${user._id}`)
-    .then(res => res.json())
-    .then(txs => {
-      const div = document.getElementById("transactions");
-      div.innerHTML = "";
-
-      if (!txs.length) {
-        div.innerHTML = "<i>No transactions yet</i>";
-        return;
-      }
-
-      txs.forEach(tx => {
-        const sign = tx.amount > 0 ? "+" : "";
-        const color = tx.amount > 0 ? "green" : "red";
-
-        div.innerHTML += `
-          <div>
-            <b>${tx.type}</b>
-            <span style="color:${color}">
-              ${sign}${tx.amount}
-            </span>
-            <small>
-              (${new Date(tx.createdAt).toLocaleTimeString()})
-            </small>
-          </div>
-        `;
-      });
-    });
 }
 
 // ===== Telegram login =====
@@ -153,7 +159,7 @@ function onTelegramAuth(user) {
   })
   .then(res => res.json())
   .then(dbUser => {
-    localStorage.setItem("user", JSON.stringify(dbUser));
+    setUser(dbUser);
     init();
   })
   .catch(() => alert("Telegram auth failed"));
@@ -184,40 +190,114 @@ function renderProfile() {
     `👤 ${user.username} | 💰 Balance: ${user.balance}`;
 }
 
-// ===== Auctions =====
-function loadAuctions() {
-  fetch(`${API}/auctions`)
+// ===== Wallet =====
+function adjustBalance(amount) {
+  const user = getUser();
+  fetch(`${API}/wallet/adjust`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ userId: user._id, amount }),
+  })
+  .then(res => res.json())
+  .then(updated => {
+    if (updated.error) return alert(updated.error);
+    setUser(updated);
+    renderProfile();
+    loadTransactions();
+  });
+}
+
+// ===== Transactions =====
+function loadTransactions() {
+  const user = getUser();
+  if (!user) return;
+
+  fetch(`${API}/transactions?userId=${user._id}`)
     .then(res => res.json())
-    .then(auctions => {
-      const div = document.getElementById("auctions");
+    .then(txs => {
+      const div = document.getElementById("transactions");
       div.innerHTML = "";
 
-      auctions.forEach(a => {
+      if (!txs.length) {
+        div.innerHTML = "<i>No transactions yet</i>";
+        return;
+      }
+
+      txs.forEach(tx => {
+        const sign = tx.amount > 0 ? "+" : "";
+        const color = tx.amount > 0 ? "green" : "red";
         div.innerHTML += `
-          <div class="auction" id="auction-${a._id}">
-            <b>${a.item}</b><br>
-            Start: ${a.startingPrice}<br>
-            Highest: ${a.highestBid}<br>
-            Winner: ${a.highestBidder ? a.highestBidder.username : "-"}<br>
-            <input type="number" id="bid-${a._id}" placeholder="Your bid">
-            <button onclick="bid('${a._id}')">Bid</button>
+          <div>
+            <b>${tx.type}</b>
+            <span style="color:${color}">${sign}${tx.amount}</span>
+            <span class="muted">${new Date(tx.createdAt).toLocaleTimeString()}</span>
           </div>
         `;
       });
     });
 }
 
+// ===== Auctions =====
+function loadAuctions() {
+  fetch(`${API}/auctions`)
+    .then(res => res.json())
+    .then(auctions => renderAuctions(auctions));
+}
+
+function renderAuctions(auctions) {
+  const div = document.getElementById("auctions");
+  div.innerHTML = "";
+
+  auctions.forEach(a => {
+    const endsAtMs = a.endsAt ? new Date(a.endsAt).getTime() : null;
+    if (endsAtMs) endsAtCache.set(a._id, endsAtMs);
+
+    const leftSec = endsAtMs ? Math.max(0, Math.floor((endsAtMs - Date.now()) / 1000)) : 0;
+    const ended = !a.isActive || leftSec <= 0;
+
+    div.innerHTML += `
+      <div class="auction ${ended ? "ended" : ""}" id="auction-${a._id}">
+        <b>${a.item}</b><br>
+        Start: ${a.startingPrice}<br>
+        Highest: ${a.highestBid}<br>
+        Winner: ${a.highestBidder ? a.highestBidder.username : "-"}<br>
+        ⏳ Time left: <span id="timer-${a._id}">${leftSec}</span>s<br>
+
+        <input type="number" id="bid-${a._id}" placeholder="Your bid" ${ended ? "disabled" : ""}>
+        <button onclick="bid('${a._id}')" ${ended ? "disabled" : ""}>${ended ? "Ended" : "Bid"}</button>
+
+        <div class="muted">
+          Sniping window: ${a.snipingWindowSec || 15}s, extend: ${a.extendSec || 15}s
+        </div>
+      </div>
+    `;
+  });
+}
+
 function createAuction() {
   const item = document.getElementById("item").value;
-  const price = parseInt(document.getElementById("price").value);
+  const price = Number(document.getElementById("price").value);
+
+  const durationSec = Number(document.getElementById("durationSec").value);
+  const snipingWindowSec = Number(document.getElementById("snipingWindowSec").value);
+  const extendSec = Number(document.getElementById("extendSec").value);
 
   if (!item || !price) return alert("Fill fields");
 
   fetch(`${API}/auctions`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ item, startingPrice: price })
-  }).then(() => {
+    body: JSON.stringify({
+      item,
+      startingPrice: price,
+      durationSec,
+      snipingWindowSec,
+      extendSec
+    })
+  })
+  .then(res => res.json())
+  .then(data => {
+    if (data.error) return alert(data.error);
     document.getElementById("item").value = "";
     document.getElementById("price").value = "";
   });
@@ -225,8 +305,7 @@ function createAuction() {
 
 function bid(auctionId) {
   const user = getUser();
-  const amount = parseInt(document.getElementById(`bid-${auctionId}`).value);
-
+  const amount = Number(document.getElementById(`bid-${auctionId}`).value);
   if (!amount) return alert("Enter bid");
 
   fetch(`${API}/auctions/${auctionId}/bid`, {
@@ -236,35 +315,72 @@ function bid(auctionId) {
   })
   .then(res => res.json())
   .then(data => {
-	if (data.user) {
-	    localStorage.setItem("user", JSON.stringify(data.user));
-		renderProfile();
-		loadTransactions();
-	}
+    if (data.error) return alert(data.error);
+    if (data.user) {
+      setUser(data.user);
+      renderProfile();
+      loadTransactions();
+    }
   });
-
 }
 
-// ===== Socket.IO =====
-socket.on("auctionUpdated", auction => {
-  const auctionDiv = document.getElementById(`auction-${auction._id}`);
-  if (!auctionDiv) {
+// ===== Socket.IO live updates =====
+socket.on("auctionUpdated", (auction) => {
+  // cache endsAt so timer ticks smoothly
+  if (auction.endsAt) endsAtCache.set(auction._id, new Date(auction.endsAt).getTime());
+
+  // simplest: reload auctions list if card doesn't exist
+  const card = document.getElementById(`auction-${auction._id}`);
+  if (!card) {
     loadAuctions();
     return;
   }
 
-  auctionDiv.innerHTML = `
+  // update just this card (keep it simple)
+  const endsAtMs = auction.endsAt ? new Date(auction.endsAt).getTime() : null;
+  const leftSec = endsAtMs ? Math.max(0, Math.floor((endsAtMs - Date.now()) / 1000)) : 0;
+  const ended = !auction.isActive || leftSec <= 0;
+
+  card.className = `auction ${ended ? "ended" : ""}`;
+  card.innerHTML = `
     <b>${auction.item}</b><br>
     Start: ${auction.startingPrice}<br>
     Highest: ${auction.highestBid}<br>
     Winner: ${auction.highestBidder ? auction.highestBidder.username : "-"}<br>
-    <input type="number" id="bid-${auction._id}" placeholder="Your bid">
-    <button onclick="bid('${auction._id}')">Bid</button>
+    ⏳ Time left: <span id="timer-${auction._id}">${leftSec}</span>s<br>
+
+    <input type="number" id="bid-${auction._id}" placeholder="Your bid" ${ended ? "disabled" : ""}>
+    <button onclick="bid('${auction._id}')" ${ended ? "disabled" : ""}>${ended ? "Ended" : "Bid"}</button>
+
+    <div class="muted">
+      Sniping window: ${auction.snipingWindowSec || 15}s, extend: ${auction.extendSec || 15}s
+    </div>
   `;
 });
+
+// ===== Frontend timer tick =====
+// purely visual; real truth is endsAt from server
+setInterval(() => {
+  for (const [auctionId, endsAtMs] of endsAtCache.entries()) {
+    const span = document.getElementById(`timer-${auctionId}`);
+    if (!span) continue;
+
+    const leftSec = Math.max(0, Math.floor((endsAtMs - Date.now()) / 1000));
+    span.textContent = String(leftSec);
+
+    // optional: disable bid UI when timer hits 0 (server also enforces)
+    if (leftSec <= 0) {
+      const card = document.getElementById(`auction-${auctionId}`);
+      if (card && !card.classList.contains("ended")) {
+        card.classList.add("ended");
+      }
+    }
+  }
+}, 500);
 
 // ===== Start =====
 init();
 </script>
+
 </body>
 </html>
